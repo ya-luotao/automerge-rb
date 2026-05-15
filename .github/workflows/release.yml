@@ -51,9 +51,10 @@ jobs:
           cargo-cache: true
       # cross-gem-action is archived and its bundled @actions/artifact@1.x is
       # rejected by GitHub Actions ("Create Artifact Container failed").
-      # oxidize-rb/actions/cross-gem is the supported successor: it builds via
-      # rb-sys-dock and exposes gem-path so we upload with modern v4 ourselves.
-      - uses: oxidize-rb/actions/cross-gem@v1.4.4
+      # oxidize-rb/actions/cross-gem is the supported successor; pinned past
+      # v1.4.4 because that tag references inputs.pre-script but never declared
+      # it as an input or wired it through to rb-sys-dock (dc5cfb9 did both).
+      - uses: oxidize-rb/actions/cross-gem@dc5cfb92469a14f8ced15a13f1c5529ad7701010
         id: cross-gem
         with:
           platform: ${{ matrix.platform }}
