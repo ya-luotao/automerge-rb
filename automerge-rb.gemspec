@@ -17,6 +17,7 @@ Gem::Specification.new do |spec|
     files = Dir[
       "README.md",
       "LICENSE.txt",
+      "rust-toolchain.toml",
       "lib/**/*.rb",
       "ext/**/*.{c,h,rb}",
       "vendor/**/*",
