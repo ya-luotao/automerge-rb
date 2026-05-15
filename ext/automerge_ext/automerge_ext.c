@@ -187,6 +187,8 @@ extern AMresult *AMsetActorId(AMdoc *doc, const AMactorId *actor_id);
 extern AMresult *AMspliceText(AMdoc *doc, const AMobjId *obj_id, size_t pos, ptrdiff_t del, AMbyteSpan text);
 extern AMresult *AMsyncMessageDecode(const uint8_t *src, size_t count);
 extern AMresult *AMsyncMessageEncode(const AMsyncMessage *sync_message);
+extern AMresult *AMsyncMessageHeads(const AMsyncMessage *sync_message);
+extern AMresult *AMsyncMessageNeeds(const AMsyncMessage *sync_message);
 extern AMresult *AMsyncStateDecode(const uint8_t *src, size_t count);
 extern AMresult *AMsyncStateEncode(const AMsyncState *sync_state);
 extern bool AMsyncStateEqual(const AMsyncState *sync_state1, const AMsyncState *sync_state2);
@@ -1728,6 +1730,32 @@ static VALUE sync_state_shared_heads(VALUE self) {
     return array_from_items_result(AMsyncStateSharedHeads(state->state), AM_VAL_TYPE_CHANGE_HASH);
 }
 
+/* Decode the wire bytes of a sync message and return a Hash describing it.
+ * Only `heads` and `needs` are surfaced — those are sufficient for
+ * automerge-repo to drive its sync state machine (peer document status
+ * inference, see DocSynchronizer). */
+static VALUE automerge_s_decode_sync_message(VALUE klass, VALUE bytes) {
+    (void)klass;
+    StringValue(bytes);
+    AMbyteSpan span = string_span(bytes);
+    AMresult *msg_result = AMsyncMessageDecode(span.src, span.count);
+    check_result(msg_result);
+    AMitem *msg_item = AMresultItem(msg_result);
+    const AMsyncMessage *message = NULL;
+    if (!msg_item || !AMitemToSyncMessage(msg_item, &message) || !message) {
+        AMresultFree(msg_result);
+        rb_raise(cError, "expected Automerge sync message bytes");
+    }
+    VALUE heads = array_from_items_result(AMsyncMessageHeads(message), AM_VAL_TYPE_CHANGE_HASH);
+    VALUE needs = array_from_items_result(AMsyncMessageNeeds(message), AM_VAL_TYPE_CHANGE_HASH);
+    AMresultFree(msg_result);
+
+    VALUE info = rb_hash_new();
+    rb_hash_aset(info, ID2SYM(rb_intern2("heads", 5)), heads);
+    rb_hash_aset(info, ID2SYM(rb_intern2("needs", 5)), needs);
+    return info;
+}
+
 static VALUE ensure_class_under(VALUE parent, const char *name, VALUE superclass) {
     ID id = rb_intern2(name, (long)strlen(name));
     if (rb_const_defined(parent, id)) {
@@ -1802,4 +1830,6 @@ void Init_automerge_ext(void) {
     rb_define_method(cSyncState, "encode", sync_state_encode, 0);
     rb_define_method(cSyncState, "==", sync_state_equal, 1);
     rb_define_method(cSyncState, "shared_heads", sync_state_shared_heads, 0);
+
+    rb_define_module_function(mAutomerge, "decode_sync_message", automerge_s_decode_sync_message, 1);
 }

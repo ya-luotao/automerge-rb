@@ -3,12 +3,12 @@ require_relative "lib/automerge/version"
 Gem::Specification.new do |spec|
   spec.name = "automerge-rb"
   spec.version = Automerge::VERSION
-  spec.authors = ["Automerge Ruby contributors"]
-  spec.email = ["maintainers@example.com"]
+  spec.authors = ["ya-luotao"]
+  spec.email = ["luotao@hey.com"]
 
   spec.summary = "Ruby bindings for the Automerge CRDT core"
   spec.description = "A production-oriented Ruby SDK for Automerge backed by the upstream Rust/C core."
-  spec.homepage = "https://github.com/automerge/automerge"
+  spec.homepage = "https://github.com/ya-luotao/automerge-rb"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.0"
   spec.required_rubygems_version = ">= 3.3.22"
