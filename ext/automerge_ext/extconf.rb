@@ -11,7 +11,11 @@ candidate_prebuilt = [
   File.join(ROOT, "lib", "automerge", ruby_api, "automerge_ext.#{dlext}"),
   File.join(ROOT, "lib", "automerge", "automerge_ext.#{dlext}"),
 ]
-prebuilt_artifact = candidate_prebuilt.find { |p| File.file?(p) }
+# rake-compiler's cross-compile loop installs each ABI's .so to lib/automerge/
+# before invoking extconf.rb for the next ABI; treating that as a prebuilt
+# would short-circuit the next build with the wrong ABI.
+cross_compile = !ENV["CARGO_BUILD_TARGET"].to_s.empty?
+prebuilt_artifact = cross_compile ? nil : candidate_prebuilt.find { |p| File.file?(p) }
 
 if prebuilt_artifact
   File.write("Makefile", <<~MAKE)
@@ -115,7 +119,12 @@ host_os = RbConfig::CONFIG["host_os"]
 if host_os =~ /darwin/
   $LDFLAGS << " -Wl,-force_load,#{lib}"
 elsif host_os =~ /mingw|mswin|cygwin/
-  $LDFLAGS << " -Wl,--whole-archive #{lib} -Wl,--no-whole-archive"
+  # Rust std on windows-gnu resolves NtWriteFile/RtlNtStatusToDosError via
+  # ntdll and uses ws2_32/userenv/bcrypt/advapi32/iphlpapi/synchronization.
+  # --allow-multiple-definition tolerates Rust's duplicate DLL import-lib stubs
+  # (e.g. ProcessPrng from bcryptprimitives) that --whole-archive would otherwise reject.
+  $LDFLAGS << " -Wl,--allow-multiple-definition -Wl,--whole-archive #{lib} -Wl,--no-whole-archive" \
+              " -lntdll -lws2_32 -luserenv -lbcrypt -ladvapi32 -liphlpapi -lsynchronization -lkernel32"
 else
   $LDFLAGS << " -Wl,--whole-archive #{lib} -Wl,--no-whole-archive -lpthread -ldl -lm"
 end
