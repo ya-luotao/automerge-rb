@@ -49,6 +49,10 @@ jobs:
           ruby-version: "3.3"
           bundler-cache: true
           cargo-cache: true
+      # rb-sys-dock bind-mounts ~/.cargo/registry and ~/.cargo/git into the
+      # container; setup-ruby-and-rust only creates them on cache hit.
+      - name: Ensure cargo cache directories exist
+        run: mkdir -p ~/.cargo/registry ~/.cargo/git
       # cross-gem-action is archived and its bundled @actions/artifact@1.x is
       # rejected by GitHub Actions ("Create Artifact Container failed").
       # oxidize-rb/actions/cross-gem is the supported successor; pinned past
