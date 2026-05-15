@@ -93,3 +93,49 @@ Implemented document operations include:
 - merge conflict reads with `get_all`
 - the stateful sync protocol with `SyncState`
 - text cursors and text marks
+
+## Historical reads
+
+Every read accepts an optional `heads:` keyword argument naming a vector of
+change hashes (typically returned by `Document#heads`). When supplied, the read
+resolves against that historical snapshot instead of the current HEAD:
+
+```ruby
+doc = Automerge.init
+doc.put(["k"], "v1"); doc.commit
+h1 = doc.heads
+doc.put(["k"], "v2"); doc.commit
+
+doc.get(["k"])               #=> "v2"
+doc.get(["k"], heads: h1)    #=> "v1"
+doc.keys([], heads: h1)      #=> ["k"]
+doc.length(["list"], heads: h1)
+doc.cursor_position(["text"], cursor, heads: h1)
+doc.marks(["text"], heads: h1)
+doc.get_all(["k"], heads: h1)
+```
+
+## Change metadata
+
+`Automerge.decode_change(bytes)` unpacks a change-bytes blob (from
+`Document#change_by_hash` or `Document#get_changes`) into a hash describing the
+change. Useful for audit logs and replication tooling:
+
+```ruby
+hash = doc.commit(message: "Add card", timestamp: Time.now.to_i)
+meta = Automerge.decode_change(doc.change_by_hash(hash))
+meta[:message]    # => "Add card"
+meta[:actor_id]   # => "deadbeef"
+meta[:timestamp]  # => 1735689600
+meta[:seq]        # => 4
+meta[:deps]       # => [<change hash>, ...]
+meta[:empty]      # => false
+```
+
+## Thread safety
+
+`Automerge::Document` instances are not thread-safe. Two threads sharing the
+same `Document` must coordinate externally; concurrent mutations or even
+concurrent reads against an in-progress writer will trigger undefined behavior
+in the underlying Rust core. Sharing across threads is safe only after a
+`save`/`load` round-trip or `fork` produces independent documents.

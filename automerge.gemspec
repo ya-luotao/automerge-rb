@@ -31,4 +31,8 @@ Gem::Specification.new do |spec|
   spec.metadata["allowed_push_host"] = "https://rubygems.org"
   spec.metadata["source_code_uri"] = "https://github.com/automerge/automerge"
   spec.metadata["changelog_uri"] = "https://github.com/automerge/automerge/blob/main/rust/CHANGELOG.md"
+
+  spec.add_development_dependency "rake", "~> 13.0"
+  spec.add_development_dependency "minitest", "~> 5.16"
+  spec.add_development_dependency "rake-compiler", "~> 1.2"
 end

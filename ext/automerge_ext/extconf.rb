@@ -69,7 +69,7 @@ run!(*cmd.compact)
 lib = File.join(target_dir, profile_dir, RbConfig::CONFIG["LIBRUBY_SO"] =~ /mswin|mingw/ ? "automerge_core.lib" : "libautomerge_core.a")
 abort "could not find built Automerge core library: #{lib}" unless File.file?(lib)
 
-$CFLAGS << " -std=c99 -Wall -Wextra"
+$CFLAGS << " -std=c99 -Wall -Wextra -Wno-missing-field-initializers"
 if RbConfig::CONFIG["host_os"] =~ /darwin/
   $LDFLAGS << " -Wl,-force_load,#{lib}"
 else

@@ -38,7 +38,9 @@ require "automerge_ext"
 
 module Automerge
   class Document
-    def self.from(value, actor_id: nil)
+    def self.from(value = nil, **opts)
+      actor_id = opts.delete(:actor_id)
+      value = opts if value.nil? && !opts.empty?
       doc = new(actor_id: actor_id)
       unless value.is_a?(Hash)
         raise ArgumentError, "Automerge document root must be a Hash"
@@ -47,6 +49,7 @@ module Automerge
       value.each do |key, child|
         doc.put([key], child)
       end
+      doc.commit
       doc
     end
 
@@ -88,11 +91,15 @@ module Automerge
     Document.new(actor_id: actor_id)
   end
 
-  def self.from(value, actor_id: nil)
-    Document.from(value, actor_id: actor_id)
+  def self.from(value = nil, **opts)
+    Document.from(value, **opts)
   end
 
   def self.load(bytes)
     Document.load(bytes)
+  end
+
+  def self.decode_change(bytes)
+    Document.decode_change(bytes)
   end
 end

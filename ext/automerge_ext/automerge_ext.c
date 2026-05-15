@@ -193,6 +193,17 @@ extern bool AMsyncStateEqual(const AMsyncState *sync_state1, const AMsyncState *
 extern AMresult *AMsyncStateInit(void);
 extern AMresult *AMsyncStateSharedHeads(const AMsyncState *sync_state);
 extern AMresult *AMtext(const AMdoc *doc, const AMobjId *obj_id, const AMitems *heads);
+extern AMresult *AMchangeActorId(const AMchange *change);
+extern AMbyteSpan AMchangeMessage(const AMchange *change);
+extern int64_t AMchangeTime(const AMchange *change);
+extern AMbyteSpan AMchangeHash(const AMchange *change);
+extern uint64_t AMchangeSeq(const AMchange *change);
+extern uint64_t AMchangeMaxOp(const AMchange *change);
+extern uint64_t AMchangeStartOp(const AMchange *change);
+extern AMresult *AMchangeDeps(const AMchange *change);
+extern size_t AMchangeSize(const AMchange *change);
+extern bool AMchangeIsEmpty(const AMchange *change);
+extern AMbyteSpan AMchangeExtraBytes(const AMchange *change);
 
 typedef struct {
     AMresult *result;
@@ -356,16 +367,28 @@ static void doc_free(void *ptr) {
     }
 }
 
+static size_t doc_memsize(const void *ptr) {
+    (void)ptr;
+    return sizeof(amrb_doc_t);
+}
+
+static const rb_data_type_t amrb_doc_type = {
+    "Automerge::Document",
+    {NULL, doc_free, doc_memsize},
+    NULL, NULL,
+    RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static VALUE doc_alloc(VALUE klass) {
     amrb_doc_t *doc = ALLOC(amrb_doc_t);
     doc->result = NULL;
     doc->doc = NULL;
-    return Data_Wrap_Struct(klass, NULL, doc_free, doc);
+    return TypedData_Wrap_Struct(klass, &amrb_doc_type, doc);
 }
 
 static amrb_doc_t *get_doc(VALUE self) {
     amrb_doc_t *doc;
-    Data_Get_Struct(self, amrb_doc_t, doc);
+    TypedData_Get_Struct(self, amrb_doc_t, &amrb_doc_type, doc);
     if (!doc || !doc->doc) {
         rb_raise(cError, "uninitialized Automerge document");
     }
@@ -383,7 +406,7 @@ static VALUE doc_from_result(VALUE klass, AMresult *result) {
 
     VALUE obj = doc_alloc(klass);
     amrb_doc_t *doc;
-    Data_Get_Struct(obj, amrb_doc_t, doc);
+    TypedData_Get_Struct(obj, amrb_doc_t, &amrb_doc_type, doc);
     doc->result = result;
     doc->doc = native_doc;
     return obj;
@@ -399,16 +422,28 @@ static void sync_state_free(void *ptr) {
     }
 }
 
+static size_t sync_state_memsize(const void *ptr) {
+    (void)ptr;
+    return sizeof(amrb_sync_state_t);
+}
+
+static const rb_data_type_t amrb_sync_state_type = {
+    "Automerge::SyncState",
+    {NULL, sync_state_free, sync_state_memsize},
+    NULL, NULL,
+    RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static VALUE sync_state_alloc(VALUE klass) {
     amrb_sync_state_t *state = ALLOC(amrb_sync_state_t);
     state->result = NULL;
     state->state = NULL;
-    return Data_Wrap_Struct(klass, NULL, sync_state_free, state);
+    return TypedData_Wrap_Struct(klass, &amrb_sync_state_type, state);
 }
 
 static amrb_sync_state_t *get_sync_state(VALUE self) {
     amrb_sync_state_t *state;
-    Data_Get_Struct(self, amrb_sync_state_t, state);
+    TypedData_Get_Struct(self, amrb_sync_state_t, &amrb_sync_state_type, state);
     if (!state || !state->state) {
         rb_raise(cError, "uninitialized Automerge sync state");
     }
@@ -426,7 +461,7 @@ static VALUE sync_state_from_result(VALUE klass, AMresult *result) {
 
     VALUE obj = sync_state_alloc(klass);
     amrb_sync_state_t *state;
-    Data_Get_Struct(obj, amrb_sync_state_t, state);
+    TypedData_Get_Struct(obj, amrb_sync_state_t, &amrb_sync_state_type, state);
     state->result = result;
     state->state = native_state;
     return obj;
@@ -499,9 +534,11 @@ static VALUE array_from_items_result(AMresult *result, int item_kind) {
     return ary;
 }
 
-static VALUE value_from_object(amrb_doc_t *doc, const AMobjId *obj);
+static VALUE value_from_object(amrb_doc_t *doc, const AMobjId *obj, const AMitems *heads);
 
-static VALUE value_from_item(amrb_doc_t *doc, AMitem *item) {
+static VALUE value_from_item(amrb_doc_t *doc, AMitem *item, const AMitems *heads);
+
+static VALUE value_from_item(amrb_doc_t *doc, AMitem *item, const AMitems *heads) {
     if (!item) {
         return Qnil;
     }
@@ -551,7 +588,7 @@ static VALUE value_from_item(amrb_doc_t *doc, AMitem *item) {
             return utf8_string_from_span(span);
         }
         case AM_VAL_TYPE_OBJ_TYPE:
-            return value_from_object(doc, AMitemObjId(item));
+            return value_from_object(doc, AMitemObjId(item), heads);
         case AM_VAL_TYPE_CHANGE:
             return bytes_from_change_item(item);
         case AM_VAL_TYPE_CHANGE_HASH:
@@ -561,10 +598,10 @@ static VALUE value_from_item(amrb_doc_t *doc, AMitem *item) {
     }
 }
 
-static VALUE value_from_object(amrb_doc_t *doc, const AMobjId *obj) {
+static VALUE value_from_object(amrb_doc_t *doc, const AMobjId *obj, const AMitems *heads) {
     AMobjType type = AMobjObjType(doc->doc, obj);
     if (type == AM_OBJ_TYPE_TEXT) {
-        AMresult *result = AMtext(doc->doc, obj, NULL);
+        AMresult *result = AMtext(doc->doc, obj, heads);
         check_result(result);
         AMitem *item = AMresultItem(result);
         AMbyteSpan span = null_span();
@@ -579,14 +616,14 @@ static VALUE value_from_object(amrb_doc_t *doc, const AMobjId *obj) {
 
     if (type == AM_OBJ_TYPE_MAP) {
         VALUE hash = rb_hash_new();
-        AMresult *result = AMmapRange(doc->doc, obj, null_span(), null_span(), NULL);
+        AMresult *result = AMmapRange(doc->doc, obj, null_span(), null_span(), heads);
         check_result(result);
         AMitems items = AMresultItems(result);
         AMitem *item = NULL;
         while ((item = AMitemsNext(&items, 1)) != NULL) {
             AMbyteSpan key = null_span();
             if (AMitemKey(item, &key)) {
-                rb_hash_aset(hash, utf8_string_from_span(key), value_from_item(doc, item));
+                rb_hash_aset(hash, utf8_string_from_span(key), value_from_item(doc, item, heads));
             }
         }
         AMresultFree(result);
@@ -594,14 +631,14 @@ static VALUE value_from_object(amrb_doc_t *doc, const AMobjId *obj) {
     }
 
     if (type == AM_OBJ_TYPE_LIST) {
-        size_t size = AMobjSize(doc->doc, obj, NULL);
+        size_t size = AMobjSize(doc->doc, obj, heads);
         VALUE ary = rb_ary_new2((long)size);
-        AMresult *result = AMlistRange(doc->doc, obj, 0, size, NULL);
+        AMresult *result = AMlistRange(doc->doc, obj, 0, size, heads);
         check_result(result);
         AMitems items = AMresultItems(result);
         AMitem *item = NULL;
         while ((item = AMitemsNext(&items, 1)) != NULL) {
-            rb_ary_push(ary, value_from_item(doc, item));
+            rb_ary_push(ary, value_from_item(doc, item, heads));
         }
         AMresultFree(result);
         return ary;
@@ -610,25 +647,25 @@ static VALUE value_from_object(amrb_doc_t *doc, const AMobjId *obj) {
     rb_raise(cError, "unsupported Automerge object type %d", type);
 }
 
-static AMresult *get_child_result(amrb_doc_t *doc, const AMobjId *obj, VALUE segment) {
+static AMresult *get_child_result(amrb_doc_t *doc, const AMobjId *obj, VALUE segment, const AMitems *heads) {
     AMobjType type = AMobjObjType(doc->doc, obj);
     if (type == AM_OBJ_TYPE_MAP) {
         VALUE key = path_key_string(segment);
-        return AMmapGet(doc->doc, obj, string_span(key), NULL);
+        return AMmapGet(doc->doc, obj, string_span(key), heads);
     }
     if (type == AM_OBJ_TYPE_LIST) {
-        return AMlistGet(doc->doc, obj, path_index(segment), NULL);
+        return AMlistGet(doc->doc, obj, path_index(segment), heads);
     }
     rb_raise(cError, "cannot descend into Automerge object type %d", type);
 }
 
-static const AMobjId *resolve_object(amrb_doc_t *doc, VALUE path, amrb_result_stack_t *stack) {
+static const AMobjId *resolve_object(amrb_doc_t *doc, VALUE path, amrb_result_stack_t *stack, const AMitems *heads) {
     VALUE ary = path_array(path);
     long len = RARRAY_LEN(ary);
     const AMobjId *obj = NULL;
 
     for (long i = 0; i < len; i++) {
-        AMresult *result = get_child_result(doc, obj, rb_ary_entry(ary, i));
+        AMresult *result = get_child_result(doc, obj, rb_ary_entry(ary, i), heads);
         check_result(result);
         AMitem *item = AMresultItem(result);
         if (!item || AMitemValType(item) != AM_VAL_TYPE_OBJ_TYPE) {
@@ -642,7 +679,7 @@ static const AMobjId *resolve_object(amrb_doc_t *doc, VALUE path, amrb_result_st
     return obj;
 }
 
-static const AMobjId *resolve_parent(amrb_doc_t *doc, VALUE path, VALUE *last_segment, amrb_result_stack_t *stack) {
+static const AMobjId *resolve_parent(amrb_doc_t *doc, VALUE path, VALUE *last_segment, amrb_result_stack_t *stack, const AMitems *heads) {
     VALUE ary = path_array(path);
     long len = RARRAY_LEN(ary);
     if (len == 0) {
@@ -652,7 +689,7 @@ static const AMobjId *resolve_parent(amrb_doc_t *doc, VALUE path, VALUE *last_se
 
     const AMobjId *obj = NULL;
     for (long i = 0; i < len - 1; i++) {
-        AMresult *result = get_child_result(doc, obj, rb_ary_entry(ary, i));
+        AMresult *result = get_child_result(doc, obj, rb_ary_entry(ary, i), heads);
         check_result(result);
         AMitem *item = AMresultItem(result);
         if (!item || AMitemValType(item) != AM_VAL_TYPE_OBJ_TYPE) {
@@ -664,6 +701,23 @@ static const AMobjId *resolve_parent(amrb_doc_t *doc, VALUE path, VALUE *last_se
         stack_push(stack, result);
     }
     return obj;
+}
+
+/* Convert a Ruby heads array (array of binary 32-byte change hashes) into a
+ * heap-allocated AMresult containing AMchangeHash items. Returns NULL when the
+ * Ruby value is nil. The caller owns the returned AMresult and must call
+ * AMresultFree. */
+static AMresult *heads_result_from_ruby(VALUE heads) {
+    if (NIL_P(heads)) return NULL;
+    return items_result_from_array(heads, 0);
+}
+
+/* Helper to extract a borrowed AMitems view from an AMresult, or set the
+ * provided AMitems * to NULL when the result is NULL. */
+static const AMitems *heads_items_view(AMresult *head_result, AMitems *out) {
+    if (!head_result) return NULL;
+    *out = AMresultItems(head_result);
+    return out;
 }
 
 static void put_ruby_value_map(amrb_doc_t *doc, const AMobjId *obj, VALUE key_value, VALUE value);
@@ -863,8 +917,8 @@ static VALUE doc_initialize(int argc, VALUE *argv, VALUE self) {
     VALUE obj = doc_from_result(CLASS_OF(self), result);
     amrb_doc_t *src;
     amrb_doc_t *dst;
-    Data_Get_Struct(obj, amrb_doc_t, src);
-    Data_Get_Struct(self, amrb_doc_t, dst);
+    TypedData_Get_Struct(obj, amrb_doc_t, &amrb_doc_type, src);
+    TypedData_Get_Struct(self, amrb_doc_t, &amrb_doc_type, dst);
     dst->result = src->result;
     dst->doc = src->doc;
     src->result = NULL;
@@ -889,57 +943,82 @@ static VALUE doc_equal(VALUE self, VALUE other) {
     return AMequal(doc->doc, other_doc->doc) ? Qtrue : Qfalse;
 }
 
-static VALUE doc_get(VALUE self, VALUE path) {
+static VALUE doc_get(int argc, VALUE *argv, VALUE self) {
+    VALUE path = Qnil;
+    VALUE opts = Qnil;
+    rb_scan_args(argc, argv, "1:", &path, &opts);
     amrb_doc_t *doc = get_doc(self);
-    VALUE ary = path_array(path);
-    if (RARRAY_LEN(ary) == 0) {
-        return value_from_object(doc, NULL);
+    AMresult *head_result = NULL;
+    if (!NIL_P(opts)) {
+        VALUE heads = rb_hash_aref(opts, ID2SYM(rb_intern2("heads", 5)));
+        head_result = heads_result_from_ruby(heads);
     }
+    AMitems head_items;
+    const AMitems *heads = heads_items_view(head_result, &head_items);
 
-    amrb_result_stack_t stack;
-    stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *parent = NULL;
-    VALUE last = Qnil;
-    parent = resolve_parent(doc, ary, &last, &stack);
-    AMresult *result = get_child_result(doc, parent, last);
-    check_result(result);
-    VALUE value = value_from_item(doc, AMresultItem(result));
-    AMresultFree(result);
-    stack_free(&stack);
+    VALUE ary = path_array(path);
+    VALUE value;
+    if (RARRAY_LEN(ary) == 0) {
+        value = value_from_object(doc, NULL, heads);
+    } else {
+        amrb_result_stack_t stack;
+        stack_init(&stack, RARRAY_LEN(ary));
+        const AMobjId *parent = NULL;
+        VALUE last = Qnil;
+        parent = resolve_parent(doc, ary, &last, &stack, heads);
+        AMresult *result = get_child_result(doc, parent, last, heads);
+        check_result(result);
+        value = value_from_item(doc, AMresultItem(result), heads);
+        AMresultFree(result);
+        stack_free(&stack);
+    }
+    if (head_result) AMresultFree(head_result);
     return value;
 }
 
-static VALUE values_array_from_result(amrb_doc_t *doc, AMresult *result) {
+static VALUE values_array_from_result(amrb_doc_t *doc, AMresult *result, const AMitems *heads) {
     check_result(result);
     AMitems items = AMresultItems(result);
     VALUE ary = rb_ary_new2((long)AMitemsSize(&items));
     AMitem *item = NULL;
     while ((item = AMitemsNext(&items, 1)) != NULL) {
-        rb_ary_push(ary, value_from_item(doc, item));
+        rb_ary_push(ary, value_from_item(doc, item, heads));
     }
     AMresultFree(result);
     return ary;
 }
 
-static VALUE doc_get_all(VALUE self, VALUE path) {
+static VALUE doc_get_all(int argc, VALUE *argv, VALUE self) {
+    VALUE path = Qnil;
+    VALUE opts = Qnil;
+    rb_scan_args(argc, argv, "1:", &path, &opts);
     amrb_doc_t *doc = get_doc(self);
+    AMresult *head_result = NULL;
+    if (!NIL_P(opts)) {
+        head_result = heads_result_from_ruby(rb_hash_aref(opts, ID2SYM(rb_intern2("heads", 5))));
+    }
+    AMitems head_items;
+    const AMitems *heads = heads_items_view(head_result, &head_items);
+
     VALUE ary = path_array(path);
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
     VALUE last = Qnil;
-    const AMobjId *parent = resolve_parent(doc, ary, &last, &stack);
+    const AMobjId *parent = resolve_parent(doc, ary, &last, &stack, heads);
     AMobjType type = AMobjObjType(doc->doc, parent);
     VALUE values;
     if (type == AM_OBJ_TYPE_MAP) {
         VALUE key = path_key_string(last);
-        values = values_array_from_result(doc, AMmapGetAll(doc->doc, parent, string_span(key), NULL));
+        values = values_array_from_result(doc, AMmapGetAll(doc->doc, parent, string_span(key), heads), heads);
     } else if (type == AM_OBJ_TYPE_LIST) {
-        values = values_array_from_result(doc, AMlistGetAll(doc->doc, parent, path_index(last), NULL));
+        values = values_array_from_result(doc, AMlistGetAll(doc->doc, parent, path_index(last), heads), heads);
     } else {
         stack_free(&stack);
+        if (head_result) AMresultFree(head_result);
         rb_raise(cError, "cannot read conflicts from Automerge object type %d", type);
     }
     stack_free(&stack);
+    if (head_result) AMresultFree(head_result);
     return values;
 }
 
@@ -949,7 +1028,7 @@ static VALUE doc_put(VALUE self, VALUE path, VALUE value) {
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
     VALUE last = Qnil;
-    const AMobjId *parent = resolve_parent(doc, ary, &last, &stack);
+    const AMobjId *parent = resolve_parent(doc, ary, &last, &stack, NULL);
     AMobjType type = AMobjObjType(doc->doc, parent);
     if (type == AM_OBJ_TYPE_MAP) {
         put_ruby_value_map(doc, parent, last, value);
@@ -968,7 +1047,7 @@ static VALUE doc_insert(VALUE self, VALUE path, VALUE index, VALUE value) {
     amrb_result_stack_t stack;
     VALUE ary = path_array(path);
     stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *obj = resolve_object(doc, ary, &stack);
+    const AMobjId *obj = resolve_object(doc, ary, &stack, NULL);
     if (AMobjObjType(doc->doc, obj) != AM_OBJ_TYPE_LIST) {
         stack_free(&stack);
         rb_raise(cError, "insert target must be an Automerge list");
@@ -984,7 +1063,7 @@ static VALUE doc_delete(VALUE self, VALUE path) {
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
     VALUE last = Qnil;
-    const AMobjId *parent = resolve_parent(doc, ary, &last, &stack);
+    const AMobjId *parent = resolve_parent(doc, ary, &last, &stack, NULL);
     AMobjType type = AMobjObjType(doc->doc, parent);
     if (type == AM_OBJ_TYPE_MAP) {
         VALUE key = path_key_string(last);
@@ -1005,7 +1084,7 @@ static VALUE doc_increment(VALUE self, VALUE path, VALUE amount) {
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
     VALUE last = Qnil;
-    const AMobjId *parent = resolve_parent(doc, ary, &last, &stack);
+    const AMobjId *parent = resolve_parent(doc, ary, &last, &stack, NULL);
     int64_t delta = NUM2LL(amount);
     AMobjType type = AMobjObjType(doc->doc, parent);
     if (type == AM_OBJ_TYPE_MAP) {
@@ -1027,7 +1106,7 @@ static VALUE doc_splice_text(VALUE self, VALUE path, VALUE index, VALUE delete_c
     VALUE ary = path_array(path);
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *obj = resolve_object(doc, ary, &stack);
+    const AMobjId *obj = resolve_object(doc, ary, &stack, NULL);
     if (AMobjObjType(doc->doc, obj) != AM_OBJ_TYPE_TEXT) {
         stack_free(&stack);
         rb_raise(cError, "splice_text target must be Automerge text");
@@ -1043,7 +1122,7 @@ static VALUE doc_splice_list(VALUE self, VALUE path, VALUE index, VALUE delete_c
     VALUE ary = path_array(path);
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *obj = resolve_object(doc, ary, &stack);
+    const AMobjId *obj = resolve_object(doc, ary, &stack, NULL);
     if (AMobjObjType(doc->doc, obj) != AM_OBJ_TYPE_LIST) {
         stack_free(&stack);
         rb_raise(cError, "splice target must be an Automerge list");
@@ -1062,57 +1141,95 @@ static VALUE doc_splice_list(VALUE self, VALUE path, VALUE index, VALUE delete_c
 
 static VALUE doc_keys(int argc, VALUE *argv, VALUE self) {
     VALUE path = Qnil;
-    rb_scan_args(argc, argv, "01", &path);
+    VALUE opts = Qnil;
+    rb_scan_args(argc, argv, "01:", &path, &opts);
     amrb_doc_t *doc = get_doc(self);
+    AMresult *head_result = NULL;
+    if (!NIL_P(opts)) {
+        head_result = heads_result_from_ruby(rb_hash_aref(opts, ID2SYM(rb_intern2("heads", 5))));
+    }
+    AMitems head_items;
+    const AMitems *heads = heads_items_view(head_result, &head_items);
     VALUE ary = path_array(path);
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *obj = resolve_object(doc, ary, &stack);
-    VALUE keys = array_from_items_result(AMkeys(doc->doc, obj, NULL), AM_VAL_TYPE_STR);
+    const AMobjId *obj = resolve_object(doc, ary, &stack, heads);
+    VALUE keys = array_from_items_result(AMkeys(doc->doc, obj, heads), AM_VAL_TYPE_STR);
     stack_free(&stack);
+    if (head_result) AMresultFree(head_result);
     return keys;
 }
 
 static VALUE doc_length(int argc, VALUE *argv, VALUE self) {
     VALUE path = Qnil;
-    rb_scan_args(argc, argv, "01", &path);
+    VALUE opts = Qnil;
+    rb_scan_args(argc, argv, "01:", &path, &opts);
     amrb_doc_t *doc = get_doc(self);
+    AMresult *head_result = NULL;
+    if (!NIL_P(opts)) {
+        head_result = heads_result_from_ruby(rb_hash_aref(opts, ID2SYM(rb_intern2("heads", 5))));
+    }
+    AMitems head_items;
+    const AMitems *heads = heads_items_view(head_result, &head_items);
     VALUE ary = path_array(path);
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *obj = resolve_object(doc, ary, &stack);
-    size_t size = AMobjSize(doc->doc, obj, NULL);
+    const AMobjId *obj = resolve_object(doc, ary, &stack, heads);
+    size_t size = AMobjSize(doc->doc, obj, heads);
     stack_free(&stack);
+    if (head_result) AMresultFree(head_result);
     return SIZET2NUM(size);
 }
 
-static VALUE doc_cursor(VALUE self, VALUE path, VALUE position) {
+static VALUE doc_cursor(int argc, VALUE *argv, VALUE self) {
+    VALUE path = Qnil;
+    VALUE position = Qnil;
+    VALUE opts = Qnil;
+    rb_scan_args(argc, argv, "20:", &path, &position, &opts);
     amrb_doc_t *doc = get_doc(self);
+    AMresult *head_result = NULL;
+    if (!NIL_P(opts)) {
+        head_result = heads_result_from_ruby(rb_hash_aref(opts, ID2SYM(rb_intern2("heads", 5))));
+    }
+    AMitems head_items;
+    const AMitems *heads = heads_items_view(head_result, &head_items);
     VALUE ary = path_array(path);
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *obj = resolve_object(doc, ary, &stack);
-    AMresult *result = AMgetCursor(doc->doc, obj, (size_t)NUM2LONG(position), NULL);
+    const AMobjId *obj = resolve_object(doc, ary, &stack, heads);
+    AMresult *result = AMgetCursor(doc->doc, obj, (size_t)NUM2LONG(position), heads);
     check_result(result);
     AMitem *item = AMresultItem(result);
     const AMcursor *cursor = NULL;
     if (!item || !AMitemToCursor(item, &cursor)) {
         AMresultFree(result);
         stack_free(&stack);
+        if (head_result) AMresultFree(head_result);
         rb_raise(cError, "expected Automerge cursor");
     }
     VALUE bytes = binary_string_from_span(AMcursorBytes(cursor));
     AMresultFree(result);
     stack_free(&stack);
+    if (head_result) AMresultFree(head_result);
     return bytes;
 }
 
-static VALUE doc_cursor_position(VALUE self, VALUE path, VALUE cursor_bytes) {
+static VALUE doc_cursor_position(int argc, VALUE *argv, VALUE self) {
+    VALUE path = Qnil;
+    VALUE cursor_bytes = Qnil;
+    VALUE opts = Qnil;
+    rb_scan_args(argc, argv, "20:", &path, &cursor_bytes, &opts);
     amrb_doc_t *doc = get_doc(self);
+    AMresult *head_result = NULL;
+    if (!NIL_P(opts)) {
+        head_result = heads_result_from_ruby(rb_hash_aref(opts, ID2SYM(rb_intern2("heads", 5))));
+    }
+    AMitems head_items;
+    const AMitems *heads = heads_items_view(head_result, &head_items);
     VALUE ary = path_array(path);
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *obj = resolve_object(doc, ary, &stack);
+    const AMobjId *obj = resolve_object(doc, ary, &stack, heads);
     StringValue(cursor_bytes);
     AMbyteSpan span = string_span(cursor_bytes);
     AMresult *cursor_result = AMcursorFromBytes(span.src, span.count);
@@ -1122,9 +1239,10 @@ static VALUE doc_cursor_position(VALUE self, VALUE path, VALUE cursor_bytes) {
     if (!cursor_item || !AMitemToCursor(cursor_item, &cursor)) {
         AMresultFree(cursor_result);
         stack_free(&stack);
+        if (head_result) AMresultFree(head_result);
         rb_raise(cError, "invalid Automerge cursor");
     }
-    AMresult *result = AMgetCursorPosition(doc->doc, obj, cursor, NULL);
+    AMresult *result = AMgetCursorPosition(doc->doc, obj, cursor, heads);
     check_result(result);
     AMitem *item = AMresultItem(result);
     uint64_t pos = 0;
@@ -1132,11 +1250,13 @@ static VALUE doc_cursor_position(VALUE self, VALUE path, VALUE cursor_bytes) {
         AMresultFree(result);
         AMresultFree(cursor_result);
         stack_free(&stack);
+        if (head_result) AMresultFree(head_result);
         rb_raise(cError, "expected cursor position");
     }
     AMresultFree(result);
     AMresultFree(cursor_result);
     stack_free(&stack);
+    if (head_result) AMresultFree(head_result);
     return ULL2NUM(pos);
 }
 
@@ -1154,7 +1274,7 @@ static AMmarkExpand mark_expand_from_value(VALUE value) {
     rb_raise(rb_eArgError, "mark expand must be one of: none, before, after, both");
 }
 
-static VALUE mark_hash_from_item(amrb_doc_t *doc, AMitem *item) {
+static VALUE mark_hash_from_item(amrb_doc_t *doc, AMitem *item, const AMitems *heads) {
     const AMmark *mark = NULL;
     if (!item || !AMitemToMark(item, &mark) || !mark) {
         rb_raise(cError, "expected Automerge mark");
@@ -1165,27 +1285,37 @@ static VALUE mark_hash_from_item(amrb_doc_t *doc, AMitem *item) {
     rb_hash_aset(hash, ID2SYM(rb_intern2("end", 3)), SIZET2NUM(AMmarkEnd(mark)));
     AMresult *value_result = AMmarkValue(mark);
     check_result(value_result);
-    rb_hash_aset(hash, ID2SYM(id_value_key), value_from_item(doc, AMresultItem(value_result)));
+    rb_hash_aset(hash, ID2SYM(id_value_key), value_from_item(doc, AMresultItem(value_result), heads));
     AMresultFree(value_result);
     return hash;
 }
 
-static VALUE doc_marks(VALUE self, VALUE path) {
+static VALUE doc_marks(int argc, VALUE *argv, VALUE self) {
+    VALUE path = Qnil;
+    VALUE opts = Qnil;
+    rb_scan_args(argc, argv, "1:", &path, &opts);
     amrb_doc_t *doc = get_doc(self);
+    AMresult *head_result = NULL;
+    if (!NIL_P(opts)) {
+        head_result = heads_result_from_ruby(rb_hash_aref(opts, ID2SYM(rb_intern2("heads", 5))));
+    }
+    AMitems head_items;
+    const AMitems *heads = heads_items_view(head_result, &head_items);
     VALUE ary = path_array(path);
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *obj = resolve_object(doc, ary, &stack);
-    AMresult *result = AMmarks(doc->doc, obj, NULL);
+    const AMobjId *obj = resolve_object(doc, ary, &stack, heads);
+    AMresult *result = AMmarks(doc->doc, obj, heads);
     check_result(result);
     AMitems items = AMresultItems(result);
     VALUE marks = rb_ary_new2((long)AMitemsSize(&items));
     AMitem *item = NULL;
     while ((item = AMitemsNext(&items, 1)) != NULL) {
-        rb_ary_push(marks, mark_hash_from_item(doc, item));
+        rb_ary_push(marks, mark_hash_from_item(doc, item, heads));
     }
     AMresultFree(result);
     stack_free(&stack);
+    if (head_result) AMresultFree(head_result);
     return marks;
 }
 
@@ -1197,7 +1327,7 @@ static VALUE doc_mark(int argc, VALUE *argv, VALUE self) {
     VALUE mark_name = path_key_string(name);
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *obj = resolve_object(doc, ary, &stack);
+    const AMobjId *obj = resolve_object(doc, ary, &stack, NULL);
     AMresult *value_result = scalar_item_result_from_ruby(value);
     check_result(value_result);
     AMitem *value_item = AMresultItem(value_result);
@@ -1215,7 +1345,7 @@ static VALUE doc_unmark(int argc, VALUE *argv, VALUE self) {
     VALUE mark_name = path_key_string(name);
     amrb_result_stack_t stack;
     stack_init(&stack, RARRAY_LEN(ary));
-    const AMobjId *obj = resolve_object(doc, ary, &stack);
+    const AMobjId *obj = resolve_object(doc, ary, &stack, NULL);
     checked_free_result(AMmarkClear(doc->doc, obj, (size_t)NUM2LONG(start), (size_t)NUM2LONG(end), mark_expand_from_value(expand), string_span(mark_name)));
     stack_free(&stack);
     return self;
@@ -1345,6 +1475,58 @@ static VALUE doc_missing_deps(int argc, VALUE *argv, VALUE self) {
     VALUE missing = array_from_items_result(AMgetMissingDeps(doc->doc, items_ptr), AM_VAL_TYPE_CHANGE_HASH);
     if (head_result) AMresultFree(head_result);
     return missing;
+}
+
+static VALUE change_metadata_hash(AMchange *change) {
+    VALUE hash = rb_hash_new();
+    rb_hash_aset(hash, ID2SYM(rb_intern2("hash", 4)), binary_string_from_span(AMchangeHash(change)));
+    AMbyteSpan msg = AMchangeMessage(change);
+    if (msg.count > 0) {
+        rb_hash_aset(hash, ID2SYM(id_message), utf8_string_from_span(msg));
+    } else {
+        rb_hash_aset(hash, ID2SYM(id_message), Qnil);
+    }
+    rb_hash_aset(hash, ID2SYM(id_timestamp), LL2NUM(AMchangeTime(change)));
+    rb_hash_aset(hash, ID2SYM(rb_intern2("seq", 3)), ULL2NUM(AMchangeSeq(change)));
+    rb_hash_aset(hash, ID2SYM(rb_intern2("max_op", 6)), ULL2NUM(AMchangeMaxOp(change)));
+    rb_hash_aset(hash, ID2SYM(rb_intern2("start_op", 8)), ULL2NUM(AMchangeStartOp(change)));
+    rb_hash_aset(hash, ID2SYM(rb_intern2("size", 4)), SIZET2NUM(AMchangeSize(change)));
+    rb_hash_aset(hash, ID2SYM(rb_intern2("empty", 5)), AMchangeIsEmpty(change) ? Qtrue : Qfalse);
+
+    AMresult *actor_result = AMchangeActorId(change);
+    check_result(actor_result);
+    AMitem *actor_item = AMresultItem(actor_result);
+    const AMactorId *actor = NULL;
+    if (actor_item && AMitemToActorId(actor_item, &actor) && actor) {
+        rb_hash_aset(hash, ID2SYM(id_actor_id), utf8_string_from_span(AMactorIdStr(actor)));
+    }
+    AMresultFree(actor_result);
+
+    AMresult *deps_result = AMchangeDeps(change);
+    rb_hash_aset(hash, ID2SYM(rb_intern2("deps", 4)),
+                 array_from_items_result(deps_result, AM_VAL_TYPE_CHANGE_HASH));
+
+    AMbyteSpan extra = AMchangeExtraBytes(change);
+    rb_hash_aset(hash, ID2SYM(rb_intern2("extra_bytes", 11)),
+                 extra.count > 0 ? binary_string_from_span(extra) : rb_str_new("", 0));
+    return hash;
+}
+
+static VALUE doc_s_decode_change(VALUE klass, VALUE bytes) {
+    (void)klass;
+    StringValue(bytes);
+    AMbyteSpan span = string_span(bytes);
+    AMresult *result = AMchangeFromBytes(span.src, span.count);
+    check_result(result);
+    AMitem *item = AMresultItem(result);
+    AMchange *change = NULL;
+    if (!item || !AMitemToChange(item, &change) || !change) {
+        AMresultFree(result);
+        rb_raise(cError, "expected Automerge change bytes");
+    }
+    VALUE meta = change_metadata_hash(change);
+    AMresultFree(result);
+    return meta;
 }
 
 static VALUE doc_change_by_hash(VALUE self, VALUE hash) {
@@ -1511,8 +1693,8 @@ static VALUE sync_state_initialize(VALUE self) {
     VALUE obj = sync_state_from_result(CLASS_OF(self), AMsyncStateInit());
     amrb_sync_state_t *src;
     amrb_sync_state_t *dst;
-    Data_Get_Struct(obj, amrb_sync_state_t, src);
-    Data_Get_Struct(self, amrb_sync_state_t, dst);
+    TypedData_Get_Struct(obj, amrb_sync_state_t, &amrb_sync_state_type, src);
+    TypedData_Get_Struct(self, amrb_sync_state_t, &amrb_sync_state_type, dst);
     dst->result = src->result;
     dst->state = src->state;
     src->result = NULL;
@@ -1573,11 +1755,12 @@ void Init_automerge_ext(void) {
     rb_define_alloc_func(cDocument, doc_alloc);
     rb_define_method(cDocument, "initialize", doc_initialize, -1);
     rb_define_singleton_method(cDocument, "load", doc_s_load, 1);
+    rb_define_singleton_method(cDocument, "decode_change", doc_s_decode_change, 1);
     rb_define_method(cDocument, "clone", doc_clone, 0);
     rb_define_method(cDocument, "dup", doc_clone, 0);
     rb_define_method(cDocument, "==", doc_equal, 1);
-    rb_define_method(cDocument, "get", doc_get, 1);
-    rb_define_method(cDocument, "get_all", doc_get_all, 1);
+    rb_define_method(cDocument, "get", doc_get, -1);
+    rb_define_method(cDocument, "get_all", doc_get_all, -1);
     rb_define_method(cDocument, "put", doc_put, 2);
     rb_define_method(cDocument, "insert", doc_insert, 3);
     rb_define_method(cDocument, "delete", doc_delete, 1);
@@ -1586,9 +1769,9 @@ void Init_automerge_ext(void) {
     rb_define_method(cDocument, "splice", doc_splice_list, 4);
     rb_define_method(cDocument, "keys", doc_keys, -1);
     rb_define_method(cDocument, "length", doc_length, -1);
-    rb_define_method(cDocument, "cursor", doc_cursor, 2);
-    rb_define_method(cDocument, "cursor_position", doc_cursor_position, 2);
-    rb_define_method(cDocument, "marks", doc_marks, 1);
+    rb_define_method(cDocument, "cursor", doc_cursor, -1);
+    rb_define_method(cDocument, "cursor_position", doc_cursor_position, -1);
+    rb_define_method(cDocument, "marks", doc_marks, -1);
     rb_define_method(cDocument, "mark", doc_mark, -1);
     rb_define_method(cDocument, "unmark", doc_unmark, -1);
     rb_define_method(cDocument, "commit", doc_commit, -1);
