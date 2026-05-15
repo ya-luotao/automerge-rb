@@ -103,12 +103,19 @@ cmd = cargo + [
 cmd << profile_flag if profile_flag
 run!(*cmd.compact)
 
-lib = File.join(target_dir, profile_dir, RbConfig::CONFIG["LIBRUBY_SO"] =~ /mswin|mingw/ ? "automerge_core.lib" : "libautomerge_core.a")
+target_triple = ENV["CARGO_BUILD_TARGET"].to_s
+profile_target_dir = target_triple.empty? ? File.join(target_dir, profile_dir) : File.join(target_dir, target_triple, profile_dir)
+
+msvc_target = target_triple.empty? ? RbConfig::CONFIG["LIBRUBY_SO"] =~ /mswin/ : target_triple.include?("windows-msvc")
+lib = File.join(profile_target_dir, msvc_target ? "automerge_core.lib" : "libautomerge_core.a")
 abort "could not find built Automerge core library: #{lib}" unless File.file?(lib)
 
 $CFLAGS << " -std=c99 -Wall -Wextra -Wno-missing-field-initializers"
-if RbConfig::CONFIG["host_os"] =~ /darwin/
+host_os = RbConfig::CONFIG["host_os"]
+if host_os =~ /darwin/
   $LDFLAGS << " -Wl,-force_load,#{lib}"
+elsif host_os =~ /mingw|mswin|cygwin/
+  $LDFLAGS << " -Wl,--whole-archive #{lib} -Wl,--no-whole-archive"
 else
   $LDFLAGS << " -Wl,--whole-archive #{lib} -Wl,--no-whole-archive -lpthread -ldl -lm"
 end
