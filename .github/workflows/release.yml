@@ -60,6 +60,7 @@ jobs:
             if [ -n "$CARGO_BUILD_TARGET" ]; then
               rustup target add "$CARGO_BUILD_TARGET"
             fi
+            bundle install
       - uses: actions/upload-artifact@v4
         with:
           name: gem-${{ matrix.platform }}
