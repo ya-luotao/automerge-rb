@@ -2,12 +2,29 @@
 
 Ruby bindings for the upstream Automerge Rust core.
 
-This gem builds a small MRI native extension and statically links the vendored
-`automerge-c` core from `vendor/automerge-rust` by default. Set
-`AUTOMERGE_SOURCE_DIR` to point at a different Automerge Rust workspace or at a
-full Automerge checkout.
+## Install
 
-## Build
+```sh
+gem install automerge
+```
+
+Precompiled native gems are published for the following platforms, so end users
+do **not** need Rust or a C toolchain installed:
+
+- `arm64-darwin` (Apple Silicon macOS)
+- `x86_64-darwin` (Intel macOS)
+- `x86_64-linux` (glibc)
+- `aarch64-linux` (glibc)
+- `x64-mingw-ucrt` (Windows)
+
+Each native gem ships a fat binary covering Ruby 3.0–3.4. RubyGems auto-selects
+the matching artifact for the host's platform and Ruby ABI at install time.
+
+On any other platform `gem install automerge` falls back to building from
+source, which requires Rust (1.89+) and a C compiler. The source build also
+runs whenever you set `--platform=ruby` explicitly.
+
+## Build from source
 
 ```sh
 bundle exec rake compile
@@ -22,6 +39,23 @@ rustup toolchain install 1.89.0
 
 The extension builds the Rust core in release mode by default. Use
 `AUTOMERGE_RB_DEBUG=1 bundle exec rake compile` for a faster local debug build.
+
+By default `extconf.rb` skips the Rust step if a prebuilt
+`lib/automerge/<ruby-abi>/automerge_ext.<dlext>` already exists (i.e. inside a
+native gem); set `AUTOMERGE_SOURCE_DIR` to point at a different Automerge Rust
+workspace if you want to recompile from a custom checkout.
+
+## Cross-compiling native gems
+
+Maintainers can build the published binary set with rake-compiler-dock:
+
+```sh
+bundle exec rake gem:native
+```
+
+This invokes the same docker-backed cross toolchain that the release workflow
+uses, producing `pkg/automerge-<version>-<platform>.gem` for every supported
+platform.
 
 ## Test alignment
 

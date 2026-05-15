@@ -1,8 +1,29 @@
 require "mkmf"
 require "fileutils"
 require "open3"
+require "rbconfig"
 
 ROOT = File.expand_path("../..", __dir__)
+
+ruby_api = RbConfig::CONFIG["ruby_version"][/\d+\.\d+/]
+dlext = RbConfig::CONFIG["DLEXT"]
+candidate_prebuilt = [
+  File.join(ROOT, "lib", "automerge", ruby_api, "automerge_ext.#{dlext}"),
+  File.join(ROOT, "lib", "automerge", "automerge_ext.#{dlext}"),
+]
+prebuilt_artifact = candidate_prebuilt.find { |p| File.file?(p) }
+
+if prebuilt_artifact
+  File.write("Makefile", <<~MAKE)
+    .PHONY: all clean install
+    all:
+    clean:
+    install:
+  MAKE
+  warn "automerge: using prebuilt extension at #{prebuilt_artifact}, skipping Rust build"
+  return
+end
+
 source_dir = ENV["AUTOMERGE_SOURCE_DIR"] || File.join(ROOT, "vendor", "automerge-rust")
 workspace_manifest = if File.file?(File.join(source_dir, "Cargo.toml"))
   File.join(source_dir, "Cargo.toml")
@@ -28,6 +49,22 @@ def rustc_minor
   version = command_output("rustc", "--version")
   match = version.match(/rustc\s+(\d+)\.(\d+)/)
   match && [match[1].to_i, match[2].to_i]
+end
+
+def have_cargo?
+  command_output("cargo", "--version").start_with?("cargo")
+end
+
+unless have_cargo?
+  abort <<~MSG
+    automerge-rb could not find `cargo` on PATH, and no prebuilt extension is
+    bundled for this platform / Ruby ABI (#{RUBY_PLATFORM} / #{RbConfig::CONFIG["ruby_version"]}).
+
+    Either:
+      * install Rust (https://rustup.rs) and retry, or
+      * install a precompiled gem for your platform with:
+          gem install automerge --platform=#{Gem::Platform.local}
+  MSG
 end
 
 toolchain = ENV["AUTOMERGE_RB_RUST_TOOLCHAIN"]

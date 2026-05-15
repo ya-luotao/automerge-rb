@@ -34,7 +34,12 @@ module Automerge
   end
 end
 
-require "automerge_ext"
+begin
+  RUBY_VERSION =~ /(\d+\.\d+)/
+  require_relative "automerge/#{Regexp.last_match(1)}/automerge_ext"
+rescue LoadError
+  require_relative "automerge/automerge_ext"
+end
 
 module Automerge
   class Document

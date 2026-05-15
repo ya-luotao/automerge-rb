@@ -1,7 +1,21 @@
 require "rake/testtask"
+require "rake/extensiontask"
 require "fileutils"
+require "rubygems/package_task"
 
 ROOT = __dir__
+
+GEMSPEC = Gem::Specification.load(File.join(ROOT, "automerge.gemspec"))
+
+CROSS_PLATFORMS = %w[
+  arm64-darwin
+  x86_64-darwin
+  x86_64-linux
+  aarch64-linux
+  x64-mingw-ucrt
+].freeze
+
+CROSS_RUBY_VERSIONS = %w[3.0 3.1 3.2 3.3 3.4].freeze
 
 def automerge_source_dir
   ENV["AUTOMERGE_SOURCE_DIR"] || File.join(ROOT, "vendor", "automerge-rust")
@@ -59,10 +73,15 @@ def upstream_c_cmake_args
   args
 end
 
-task :compile do
-  Dir.chdir("ext/automerge_ext") do
-    ruby "extconf.rb"
-    sh "make"
+Rake::ExtensionTask.new("automerge_ext", GEMSPEC) do |ext|
+  ext.ext_dir = "ext/automerge_ext"
+  ext.lib_dir = "lib/automerge"
+  ext.cross_compile = true
+  ext.cross_platform = CROSS_PLATFORMS
+  ext.cross_compiling do |spec|
+    spec.files.reject! { |f| f.start_with?("vendor/", "ext/") }
+    spec.extensions = []
+    spec.dependencies.reject! { |d| d.name == "rake-compiler-dock" }
   end
 end
 
@@ -70,10 +89,6 @@ Rake::TestTask.new(:test => :compile) do |t|
   t.libs << "lib"
   t.libs << "ext/automerge_ext"
   t.pattern = "test/**/*_test.rb"
-end
-
-task :build do
-  sh "gem build automerge.gemspec"
 end
 
 namespace :test do
@@ -116,9 +131,46 @@ end
 desc "Run Ruby API tests plus upstream Rust and C conformance tests"
 task :conformance => [:test, "test:upstream_core", "test:upstream_c"]
 
+namespace :gem do
+  desc "Build precompiled gems for all cross platforms via rake-compiler-dock"
+  task :native do
+    require "rake_compiler_dock"
+    CROSS_PLATFORMS.each do |platform|
+      RakeCompilerDock.sh(
+        "bundle install && rake native:#{platform} gem RUBY_CC_VERSION=#{CROSS_RUBY_VERSIONS.join(":")}",
+        platform: platform,
+      )
+    end
+  end
+
+  desc "Build a single-ABI native gem for the host platform (testing only)"
+  task :host => :compile do
+    dlext = RbConfig::CONFIG["DLEXT"]
+    abi = RbConfig::CONFIG["ruby_version"][/\d+\.\d+/]
+    compiled = "lib/automerge/automerge_ext.#{dlext}"
+    raise "rake compile did not produce #{compiled}" unless File.file?(compiled)
+
+    versioned_rel = "lib/automerge/#{abi}/automerge_ext.#{dlext}"
+    FileUtils.mkdir_p File.dirname(versioned_rel)
+    FileUtils.cp compiled, versioned_rel
+
+    spec = Gem::Specification.load(File.join(ROOT, "automerge.gemspec")).dup
+    spec.platform = Gem::Platform.local.to_s.sub(/(darwin)\d+/, '\1')
+    spec.files = spec.files.reject { |f| f.start_with?("vendor/", "ext/") } + [versioned_rel]
+    spec.extensions = []
+
+    FileUtils.mkdir_p "pkg"
+    gem_filename = Gem::Package.build(spec)
+    FileUtils.mv gem_filename, File.join("pkg", gem_filename)
+    puts "Built pkg/#{gem_filename}"
+  end
+end
+
 task :clean do
-  FileUtils.rm_f Dir["ext/**/*.bundle", "ext/**/*.o", "ext/**/Makefile", "*.gem"]
-  FileUtils.rm_rf ["tmp", "vendor/automerge-rust/target"]
+  FileUtils.rm_f Dir["ext/**/*.bundle", "ext/**/*.so", "ext/**/*.o", "ext/**/Makefile", "*.gem"]
+  FileUtils.rm_rf Dir["ext/**/*.dSYM"]
+  FileUtils.rm_rf ["tmp", "pkg", "vendor/automerge-rust/target"]
+  FileUtils.rm_rf Dir["lib/automerge/[0-9]*"]
 end
 
 task :default => :test
