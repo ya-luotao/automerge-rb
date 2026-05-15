@@ -49,15 +49,17 @@ jobs:
           ruby-version: "3.3"
           bundler-cache: true
           cargo-cache: true
-      # Pinned past v7 because v7 hardcodes the artifact name to "cross-gem",
-      # which collides across the matrix; af82482 adds the artifact-name input.
-      - uses: oxidize-rb/cross-gem-action@af8248258c88dd65cf31c9e9205e9c0d373db186
+      # cross-gem-action is archived and its bundled @actions/artifact@1.x is
+      # rejected by GitHub Actions ("Create Artifact Container failed").
+      # oxidize-rb/actions/cross-gem is the supported successor: it builds via
+      # rb-sys-dock and exposes gem-path so we upload with modern v4 ourselves.
+      - uses: oxidize-rb/actions/cross-gem@v1.4.4
+        id: cross-gem
         with:
           platform: ${{ matrix.platform }}
-          artifact-name: gem-${{ matrix.platform }}
           ruby-versions: "3.0,3.1,3.2,3.3,3.4"
-          version: "0.9.34"
-          setup: |
+          tag: "0.9.34"
+          pre-script: |
             set -e
             rustup toolchain install 1.89.0 --profile minimal --component rustc --component cargo
             rustup default 1.89.0
@@ -65,6 +67,11 @@ jobs:
               rustup target add "$CARGO_BUILD_TARGET"
             fi
             bundle install
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gem-${{ matrix.platform }}
+          path: ${{ steps.cross-gem.outputs.gem-path }}
+          if-no-files-found: error
 
   publish:
     name: Publish to RubyGems
