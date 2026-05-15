@@ -5,7 +5,7 @@ require "rubygems/package_task"
 
 ROOT = __dir__
 
-GEMSPEC = Gem::Specification.load(File.join(ROOT, "automerge.gemspec"))
+GEMSPEC = Gem::Specification.load(File.join(ROOT, "automerge-rb.gemspec"))
 
 CROSS_PLATFORMS = %w[
   arm64-darwin
@@ -154,7 +154,7 @@ namespace :gem do
     FileUtils.mkdir_p File.dirname(versioned_rel)
     FileUtils.cp compiled, versioned_rel
 
-    spec = Gem::Specification.load(File.join(ROOT, "automerge.gemspec")).dup
+    spec = Gem::Specification.load(File.join(ROOT, "automerge-rb.gemspec")).dup
     spec.platform = Gem::Platform.local.to_s.sub(/(darwin)\d+/, '\1')
     spec.files = spec.files.reject { |f| f.start_with?("vendor/", "ext/") } + [versioned_rel]
     spec.extensions = []

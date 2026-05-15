@@ -20,7 +20,7 @@ jobs:
           bundler-cache: true
       - uses: dtolnay/rust-toolchain@1.89.0
       - run: bundle exec rake test
-      - run: gem build automerge.gemspec
+      - run: gem build automerge-rb.gemspec
 
   upstream-core:
     runs-on: ubuntu-latest

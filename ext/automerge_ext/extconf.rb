@@ -63,7 +63,7 @@ unless have_cargo?
     Either:
       * install Rust (https://rustup.rs) and retry, or
       * install a precompiled gem for your platform with:
-          gem install automerge --platform=#{Gem::Platform.local}
+          gem install automerge-rb --platform=#{Gem::Platform.local}
   MSG
 end
 

@@ -21,11 +21,11 @@ jobs:
         with:
           ruby-version: "3.3"
           bundler-cache: true
-      - run: gem build automerge.gemspec
+      - run: gem build automerge-rb.gemspec
       - uses: actions/upload-artifact@v4
         with:
           name: gem-source
-          path: ./automerge-*.gem
+          path: ./automerge-rb-*.gem
           if-no-files-found: error
 
   cross:
@@ -56,7 +56,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: gem-${{ matrix.platform }}
-          path: pkg/automerge-*-${{ matrix.platform }}.gem
+          path: pkg/automerge-rb-*-${{ matrix.platform }}.gem
           if-no-files-found: error
 
   publish:

@@ -5,7 +5,7 @@ Ruby bindings for the upstream Automerge Rust core.
 ## Install
 
 ```sh
-gem install automerge
+gem install automerge-rb
 ```
 
 Precompiled native gems are published for the following platforms, so end users
@@ -20,7 +20,7 @@ do **not** need Rust or a C toolchain installed:
 Each native gem ships a fat binary covering Ruby 3.0–3.4. RubyGems auto-selects
 the matching artifact for the host's platform and Ruby ABI at install time.
 
-On any other platform `gem install automerge` falls back to building from
+On any other platform `gem install automerge-rb` falls back to building from
 source, which requires Rust (1.89+) and a C compiler. The source build also
 runs whenever you set `--platform=ruby` explicitly.
 
@@ -54,7 +54,7 @@ bundle exec rake gem:native
 ```
 
 This invokes the same docker-backed cross toolchain that the release workflow
-uses, producing `pkg/automerge-<version>-<platform>.gem` for every supported
+uses, producing `pkg/automerge-rb-<version>-<platform>.gem` for every supported
 platform.
 
 ## Test alignment

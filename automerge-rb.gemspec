@@ -1,7 +1,7 @@
 require_relative "lib/automerge/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "automerge"
+  spec.name = "automerge-rb"
   spec.version = Automerge::VERSION
   spec.authors = ["Automerge Ruby contributors"]
   spec.email = ["maintainers@example.com"]
