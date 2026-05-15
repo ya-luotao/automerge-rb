@@ -5,7 +5,8 @@
 /ext/**/*.bundle
 /ext/**/*.so
 /ext/**/*.o
-/lib/automerge/*/automerge_ext.*
+/lib/automerge/automerge_ext.*
 /pkg/
 /tmp/
 /*.gem
+/Gemfile.lock
